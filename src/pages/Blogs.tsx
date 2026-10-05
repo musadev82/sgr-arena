@@ -1,12 +1,38 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import BlogCard from '../components/blogs/BlogCard';
-import { blogCategories, getBlogs } from '../data/blogs';
+import { blogCategories, type Blog } from '../data/blogs';
+import { useAuth } from '../context/AuthContext';
+import { fetchBlogsFromSupabase } from '../lib/blogsService';
 
 export default function Blogs() {
-  const blogs = getBlogs();
+  const { user } = useAuth();
+  const [blogs, setBlogs] = useState<Blog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<'All' | string>('All');
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
+
+    fetchBlogsFromSupabase(user)
+      .then((nextBlogs) => {
+        if (active) setBlogs(nextBlogs);
+      })
+      .catch((loadError: Error) => {
+        if (active) setError(loadError.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [user]);
 
   const filteredBlogs = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -47,7 +73,10 @@ export default function Blogs() {
         </Link>
       </div>
 
-      {filteredBlogs.length > 0 && featuredBlog && (
+      {loading && <div className="rounded-2xl border border-edge bg-surface px-6 py-10 text-center text-sm text-muted">Loading blogs...</div>}
+      {!loading && error && <div className="rounded-2xl border border-danger/20 bg-danger/5 px-6 py-10 text-center text-sm text-danger">{error}</div>}
+
+      {!loading && !error && filteredBlogs.length > 0 && featuredBlog && (
         <section className="mb-8 overflow-hidden rounded-3xl border border-edge bg-surface shadow-sm md:flex">
           {featuredBlog.coverImage ? (
             <div className="relative h-72 w-full md:h-auto md:w-[52%]">
@@ -80,7 +109,7 @@ export default function Blogs() {
         </section>
       )}
 
-      <div className="mb-6 rounded-2xl border border-edge bg-surface p-4 shadow-sm">
+      {!loading && !error && <div className="mb-6 rounded-2xl border border-edge bg-surface p-4 shadow-sm">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="relative w-full md:max-w-md">
             <svg
@@ -120,9 +149,9 @@ export default function Blogs() {
             ))}
           </div>
         </div>
-      </div>
+      </div>}
 
-      {filteredBlogs.length === 0 ? (
+      {!loading && !error && (filteredBlogs.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-edge bg-surface px-6 py-10 text-center">
           <h2 className="font-display text-3xl font-bold text-ink">No Blogs Yet</h2>
           <p className="mt-4 max-w-xl mx-auto text-base leading-7 text-muted">
@@ -141,7 +170,7 @@ export default function Blogs() {
             <BlogCard key={blog.id} blog={blog} />
           ))}
         </div>
-      )}
+      ))}
     </div>
   );
 }

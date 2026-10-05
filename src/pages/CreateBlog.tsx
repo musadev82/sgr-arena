@@ -1,23 +1,20 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { blogCategories, estimateReadingTime, mockCurrentUser, type Blog, type BlogCategory, upsertBlog } from '../data/blogs';
+import { blogCategories, type BlogCategory } from '../data/blogs';
 import { phones } from '../data/phones';
+import { useAuth } from '../context/AuthContext';
+import { createBlogPost, type BlogImageSelection } from '../lib/blogsService';
 
 interface ImagePreview {
   id: string;
   url: string;
   name: string;
+  file: File;
 }
-
-const createSlug = (value: string) =>
-  value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') || `blog-${Date.now()}`;
 
 export default function CreateBlog() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<BlogCategory>('Reviews');
   const [excerpt, setExcerpt] = useState('');
@@ -26,6 +23,7 @@ export default function CreateBlog() {
   const [relatedSmartphoneId, setRelatedSmartphoneId] = useState('');
   const [images, setImages] = useState<ImagePreview[]>([]);
   const [aiMessage, setAiMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
@@ -33,6 +31,7 @@ export default function CreateBlog() {
       id: `${file.name}-${file.size}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       url: URL.createObjectURL(file),
       name: file.name,
+      file,
     }));
 
     setImages((current) => [...current, ...nextImages]);
@@ -47,7 +46,7 @@ export default function CreateBlog() {
     setAiMessage(`${action}: AI assistance will be connected during the backend integration phase.`);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const trimmedTitle = title.trim();
     const trimmedDescription = description.trim();
     const trimmedExcerpt = excerpt.trim() || trimmedDescription.slice(0, 160) + (trimmedDescription.length > 160 ? '...' : '');
@@ -57,28 +56,27 @@ export default function CreateBlog() {
       return;
     }
 
-    const newBlog: Blog = {
-      id: createSlug(trimmedTitle),
-      authorId: mockCurrentUser.id,
-      authorName: mockCurrentUser.name,
-      title: trimmedTitle,
-      category,
-      excerpt: trimmedExcerpt,
-      description: trimmedDescription,
-      images: images.map((image) => image.url),
-      coverImage: images[0]?.url ?? '',
-      relatedSmartphoneId: relatedSmartphoneId || null,
-      tags: tagsInput
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter(Boolean),
-      createdAt: new Date().toISOString(),
-      comments: [],
-      readingTime: estimateReadingTime(trimmedDescription),
-    };
+    if (!user) {
+      setAiMessage('Please log in before publishing a blog.');
+      return;
+    }
 
-    upsertBlog(newBlog);
-    navigate(`/blogs/${newBlog.id}`);
+    setIsSubmitting(true);
+    try {
+      const selectedImages: BlogImageSelection[] = images.map((image) => image);
+      const blogId = await createBlogPost(user.id, {
+        title: trimmedTitle,
+        category,
+        excerpt: trimmedExcerpt || null,
+        content: trimmedDescription,
+        relatedPhoneId: relatedSmartphoneId || null,
+      }, selectedImages);
+      navigate(`/blogs/${blogId}`);
+    } catch (submitError) {
+      setAiMessage(submitError instanceof Error ? submitError.message : 'Could not publish this blog.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -205,9 +203,10 @@ export default function CreateBlog() {
               <button
                 type="button"
                 onClick={handleSubmit}
+                disabled={isSubmitting}
                 className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-dark"
               >
-                Publish Blog
+                {isSubmitting ? 'Publishing...' : 'Publish Blog'}
               </button>
               <Link
                 to="/blogs"
@@ -245,10 +244,12 @@ export default function CreateBlog() {
           <div className="mt-5 rounded-xl border border-dashed border-edge bg-bg p-3">
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">Current author</p>
             <div className="mt-3 flex items-center gap-3">
-              <img src={mockCurrentUser.avatar} alt={mockCurrentUser.name} className="h-10 w-10 rounded-full object-cover" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
+                {(user?.user_metadata?.full_name || user?.email || 'S').charAt(0).toUpperCase()}
+              </div>
               <div>
-                <p className="font-semibold text-ink">{mockCurrentUser.name}</p>
-                <p className="text-xs text-muted">Mock authenticated editor</p>
+                <p className="font-semibold text-ink">{user?.user_metadata?.full_name || user?.email || 'SGR Arena User'}</p>
+                <p className="text-xs text-muted">Authenticated author</p>
               </div>
             </div>
           </div>

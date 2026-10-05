@@ -1,17 +1,20 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { formatBlogDate, type BlogComment } from '../../data/blogs';
 
 interface BlogCommentsProps {
   comments: BlogComment[];
-  onAddComment: (text: string) => void;
+  onAddComment: (text: string) => Promise<void> | void;
   currentUserName: string;
+  isAuthenticated: boolean;
 }
 
-export default function BlogComments({ comments, onAddComment, currentUserName }: BlogCommentsProps) {
+export default function BlogComments({ comments, onAddComment, currentUserName, isAuthenticated }: BlogCommentsProps) {
   const [commentText, setCommentText] = useState('');
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
     if (!commentText.trim()) {
@@ -19,9 +22,16 @@ export default function BlogComments({ comments, onAddComment, currentUserName }
       return;
     }
 
-    onAddComment(commentText.trim());
-    setCommentText('');
+    setSubmitting(true);
     setError('');
+    try {
+      await onAddComment(commentText.trim());
+      setCommentText('');
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Could not post comment.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -61,7 +71,12 @@ export default function BlogComments({ comments, onAddComment, currentUserName }
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="mt-6 border-t border-edge pt-5">
+      {!isAuthenticated ? (
+        <div className="mt-6 border-t border-edge pt-5 text-sm text-muted">
+          <Link to="/login" className="font-semibold text-primary hover:underline">Log in</Link> or{' '}
+          <Link to="/register" className="font-semibold text-primary hover:underline">create an account</Link> to post a comment.
+        </div>
+      ) : <form onSubmit={handleSubmit} className="mt-6 border-t border-edge pt-5">
         <label htmlFor="comment" className="mb-2 block text-sm font-medium text-ink">
           Write a comment...
         </label>
@@ -81,12 +96,13 @@ export default function BlogComments({ comments, onAddComment, currentUserName }
           <span className="text-xs text-muted">Posting as {currentUserName}</span>
           <button
             type="submit"
+            disabled={submitting}
             className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-dark"
           >
-            Post Comment
+            {submitting ? 'Posting...' : 'Post Comment'}
           </button>
         </div>
-      </form>
+      </form>}
     </div>
   );
 }

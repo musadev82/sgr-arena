@@ -1,5 +1,3 @@
-import { phones } from './phones';
-
 export type BlogCategory =
   | 'Reviews'
   | 'Buying Guides'
@@ -12,11 +10,19 @@ export type BlogCategory =
 export interface BlogComment {
   commentId: string;
   blogId: string;
-  userId: string;
+  authorId: string;
   userName: string;
   commentText: string;
   createdAt: string;
-  avatar?: string;
+  isOwn?: boolean;
+}
+
+export interface BlogImage {
+  id: string;
+  url: string;
+  storagePath: string | null;
+  altText: string | null;
+  displayOrder: number;
 }
 
 export interface Blog {
@@ -27,7 +33,7 @@ export interface Blog {
   category: BlogCategory;
   excerpt: string;
   description: string;
-  images: string[];
+  images: BlogImage[];
   coverImage: string;
   relatedSmartphoneId: string | null;
   tags: string[];
@@ -67,41 +73,3 @@ export function estimateReadingTime(content: string): string {
   const minutes = Math.max(1, Math.ceil(words / 180));
   return `${minutes} min read`;
 }
-
-export function getSmartphoneOptions() {
-  return phones.map((phone) => ({
-    value: phone.id,
-    label: `${phone.brand} ${phone.name}`,
-  }));
-}
-
-export let localBlogStore: Blog[] = [];
-
-export function getBlogs(): Blog[] {
-  return localBlogStore;
-}
-
-export function upsertBlog(blog: Blog) {
-  const next = [...localBlogStore];
-  const index = next.findIndex((entry) => entry.id === blog.id);
-
-  if (index >= 0) {
-    next[index] = blog;
-  } else {
-    next.unshift(blog);
-  }
-
-  localBlogStore = next;
-  return localBlogStore;
-}
-
-export function deleteBlog(blogId: string) {
-  localBlogStore = localBlogStore.filter((blog) => blog.id !== blogId);
-  return localBlogStore;
-}
-
-export function getBlogById(blogId: string): Blog | undefined {
-  return localBlogStore.find((blog) => blog.id === blogId);
-}
-
-export default localBlogStore;

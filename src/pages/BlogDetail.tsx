@@ -1,43 +1,70 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import BlogComments from '../components/blogs/BlogComments';
-import { deleteBlog, formatBlogDate, getBlogById, mockCurrentUser, type Blog } from '../data/blogs';
+import { formatBlogDate, type Blog } from '../data/blogs';
 import { phones } from '../data/phones';
+import { useAuth } from '../context/AuthContext';
+import { createBlogComment, deleteBlogPost, fetchBlogById } from '../lib/blogsService';
 
 export default function BlogDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [blog, setBlog] = useState<Blog | null>(getBlogById(id ?? ''));
+  const { user } = useAuth();
+  const [blog, setBlog] = useState<Blog | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const isOwner = blog?.authorId === mockCurrentUser.id;
+  const isOwner = blog?.authorId === user?.id;
+  const currentUserName = user?.user_metadata?.full_name || user?.email || 'SGR Arena User';
 
-  const handleAddComment = (text: string) => {
-    if (!blog) return;
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
 
-    const newComment = {
-      commentId: `comment-${Date.now()}`,
-      blogId: blog.id,
-      userId: mockCurrentUser.id,
-      userName: mockCurrentUser.name,
-      commentText: text,
-      createdAt: new Date().toISOString(),
-      avatar: mockCurrentUser.avatar,
+    fetchBlogById(id ?? '', user)
+      .then((nextBlog) => {
+        if (active) setBlog(nextBlog);
+      })
+      .catch((loadError: Error) => {
+        if (active) setError(loadError.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
     };
+  }, [id, user]);
 
-    setBlog({
-      ...blog,
-      comments: [...blog.comments, newComment],
-    });
+  const handleAddComment = async (text: string) => {
+    if (!blog || !user) return;
+    const newComment = await createBlogComment(blog.id, user.id, text, user);
+    setBlog((current) => current ? { ...current, comments: [newComment, ...current.comments] } : current);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!blog || !window.confirm('Are you sure you want to delete this blog?')) {
       return;
     }
 
-    deleteBlog(blog.id);
-    navigate('/blogs');
+    try {
+      setError('');
+      await deleteBlogPost(blog.id);
+      navigate('/blogs');
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Could not delete this blog.');
+    }
   };
+
+  if (loading) {
+    return <div className="mx-auto max-w-4xl px-4 py-12 text-center text-sm text-muted">Loading blog...</div>;
+  }
+
+  if (error) {
+    return <div className="mx-auto max-w-4xl px-4 py-12 text-center text-sm text-danger">{error}</div>;
+  }
 
   if (!blog) {
     return (
@@ -99,9 +126,9 @@ export default function BlogDetail() {
           <div className="mt-10 grid gap-4 md:grid-cols-2">
             {blog.images.slice(1).map((image, index) => (
               <img
-                key={`${image}-${index}`}
-                src={image}
-                alt={`${blog.title} gallery ${index + 1}`}
+                key={image.id}
+                src={image.url}
+                alt={image.altText || `${blog.title} gallery ${index + 1}`}
                 className="h-64 w-full rounded-2xl object-cover"
               />
             ))}
@@ -135,7 +162,12 @@ export default function BlogDetail() {
           </div>
         </div>
 
-        <BlogComments comments={blog.comments} onAddComment={handleAddComment} currentUserName={mockCurrentUser.name} />
+        <BlogComments
+          comments={blog.comments}
+          onAddComment={handleAddComment}
+          currentUserName={currentUserName}
+          isAuthenticated={Boolean(user)}
+        />
 
         <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
           <Link to="/blogs" className="text-sm font-medium text-primary hover:underline">← Back to all blogs</Link>

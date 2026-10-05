@@ -43,9 +43,9 @@ export default function App() {
             <Route path="/blogs/:id" element={<BlogDetail />} />
             <Route element={<RequireAuth />}>
               <Route path="/blogs/create" element={<CreateBlog />} />
+              <Route path="/blogs/:id/edit" element={<EditBlog />} />
               <Route path="/profile" element={<Profile />} />
             </Route>
-            <Route path="/blogs/:id/edit" element={<EditBlog />} />
             <Route path="/community" element={<Community />} />
             <Route path="/ai-summary" element={<AISummary />} />
             <Route path="/ai-community" element={<AICommunity />} />

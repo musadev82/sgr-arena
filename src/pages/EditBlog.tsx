@@ -1,43 +1,71 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { blogCategories, getBlogById, mockCurrentUser, type Blog, type BlogCategory, upsertBlog } from '../data/blogs';
+import { blogCategories, type BlogCategory } from '../data/blogs';
 import { phones } from '../data/phones';
+import { useAuth } from '../context/AuthContext';
+import { fetchBlogById, syncBlogImages, updateBlogPost, type BlogImageSelection } from '../lib/blogsService';
 
 interface ImagePreview {
   id: string;
   url: string;
   name: string;
+  file?: File;
+  storagePath?: string | null;
 }
 
 export default function EditBlog() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const existingBlog = getBlogById(id ?? '');
+  const { user } = useAuth();
+  const [existingBlog, setExistingBlog] = useState<Awaited<ReturnType<typeof fetchBlogById>>>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState<BlogCategory>('Reviews');
+  const [excerpt, setExcerpt] = useState('');
+  const [description, setDescription] = useState('');
+  const [tagsInput, setTagsInput] = useState('');
+  const [relatedSmartphoneId, setRelatedSmartphoneId] = useState('');
+  const [images, setImages] = useState<ImagePreview[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!existingBlog) {
-    return (
-      <div className="mx-auto max-w-3xl px-4 py-12 text-center">
-        <h1 className="font-display text-3xl font-bold text-ink">Blog not found</h1>
-        <Link to="/blogs" className="mt-4 inline-block text-primary hover:underline">
-          Return to blogs
-        </Link>
-      </div>
-    );
-  }
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
 
-  const [title, setTitle] = useState(existingBlog.title);
-  const [category, setCategory] = useState<BlogCategory>(existingBlog.category);
-  const [excerpt, setExcerpt] = useState(existingBlog.excerpt);
-  const [description, setDescription] = useState(existingBlog.description);
-  const [tagsInput, setTagsInput] = useState(existingBlog.tags.join(', '));
-  const [relatedSmartphoneId, setRelatedSmartphoneId] = useState(existingBlog.relatedSmartphoneId ?? '');
-  const [images, setImages] = useState<ImagePreview[]>(
-    existingBlog.images.map((image, index) => ({
-      id: `${existingBlog.id}-image-${index}`,
-      url: image,
-      name: `${existingBlog.title} image ${index + 1}`,
-    })),
-  );
+    fetchBlogById(id ?? '', user)
+      .then((blog) => {
+        if (!active) return;
+        if (!blog || blog.authorId !== user?.id) {
+          setError('Blog not found or you do not have permission to edit it.');
+          return;
+        }
+        setExistingBlog(blog);
+        setTitle(blog.title);
+        setCategory(blog.category);
+        setExcerpt(blog.excerpt);
+        setDescription(blog.description);
+        setTagsInput(blog.tags.join(', '));
+        setRelatedSmartphoneId(blog.relatedSmartphoneId ?? '');
+        setImages(blog.images.map((image) => ({
+          id: image.id,
+          url: image.url,
+          name: image.altText || `${blog.title} image`,
+          storagePath: image.storagePath,
+        })));
+      })
+      .catch((loadError: Error) => {
+        if (active) setError(loadError.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [id, user]);
 
   const handleImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
@@ -45,6 +73,7 @@ export default function EditBlog() {
       id: `${file.name}-${file.size}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       url: URL.createObjectURL(file),
       name: file.name,
+      file,
     }));
 
     setImages((current) => [...current, ...nextImages]);
@@ -55,25 +84,44 @@ export default function EditBlog() {
     setImages((current) => current.filter((image) => image.id !== imageId));
   };
 
-  const handleSubmit = () => {
-    const updatedBlog: Blog = {
-      ...existingBlog,
-      title: title.trim() || existingBlog.title,
-      category,
-      excerpt: excerpt.trim() || existingBlog.excerpt,
-      description: description.trim() || existingBlog.description,
-      coverImage: images[0]?.url ?? existingBlog.coverImage,
-      images: images.length > 0 ? images.map((image) => image.url) : existingBlog.images,
-      relatedSmartphoneId: relatedSmartphoneId || null,
-      tags: tagsInput
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter(Boolean),
-    };
+  const handleSubmit = async () => {
+    if (!existingBlog || !user) return;
 
-    upsertBlog(updatedBlog);
-    navigate(`/blogs/${updatedBlog.id}`);
+    setIsSubmitting(true);
+    setError('');
+    try {
+      await updateBlogPost(existingBlog.id, {
+        title: title.trim() || existingBlog.title,
+        category,
+        excerpt: excerpt.trim() || existingBlog.excerpt,
+        content: description.trim() || existingBlog.description,
+        relatedPhoneId: relatedSmartphoneId || null,
+      });
+      const selectedImages: BlogImageSelection[] = images.map((image) => image);
+      await syncBlogImages(existingBlog.id, user.id, selectedImages);
+      navigate(`/blogs/${existingBlog.id}`);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Could not save this blog.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
+
+  if (loading) {
+    return <div className="mx-auto max-w-3xl px-4 py-12 text-center text-sm text-muted">Loading blog...</div>;
+  }
+
+  if (error || !existingBlog) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-12 text-center">
+        <h1 className="font-display text-3xl font-bold text-ink">Blog not found</h1>
+        <p className="mt-3 text-sm text-danger">{error || 'This blog could not be loaded.'}</p>
+        <Link to="/blogs" className="mt-4 inline-block text-primary hover:underline">
+          Return to blogs
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 md:py-10">
@@ -194,9 +242,10 @@ export default function EditBlog() {
             <button
               type="button"
               onClick={handleSubmit}
+              disabled={isSubmitting}
               className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-dark"
             >
-              Save Changes
+              {isSubmitting ? 'Saving...' : 'Save Changes'}
             </button>
             <Link
               to={`/blogs/${existingBlog.id}`}
@@ -208,7 +257,7 @@ export default function EditBlog() {
         </div>
 
         <div className="mt-6 rounded-xl border border-primary/20 bg-primary-light p-3 text-sm text-primary">
-          Editing as {mockCurrentUser.name}. This mock state is ready to be replaced by Supabase Auth and database operations later.
+          Editing as {user?.user_metadata?.full_name || user?.email || 'SGR Arena User'}.
         </div>
       </div>
     </div>
